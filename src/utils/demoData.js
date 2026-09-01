@@ -23,20 +23,63 @@ const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const roundTo = (value, step) => Math.round(value / step) * step;
 const pad = (value, size = 4) => String(value).padStart(size, '0');
 
-const buildTimestamp = (rng, index) => {
-  const start = new Date('2026-04-01T00:00:00+05:30').getTime();
-  const end = new Date('2026-08-31T23:59:59+05:30').getTime();
-  const daySpread = (index * 104729) % (end - start);
-  const jitter = Math.floor(rng() * 48 * 60 * 60 * 1000);
-  const date = new Date(start + ((daySpread + jitter) % (end - start)));
+const buildTimestamp = (rng, index, totalBookings) => {
+  if (index === 0) return new Date('2026-05-27T14:23:00+05:30').toISOString();
+  if (index === totalBookings - 1) return new Date('2026-08-31T14:26:00+05:30').toISOString();
+
+  const month = weightedPick(rng, [6, 7, 8], [2608, 5903, 6616]);
+  const daysInMonth = new Date(2026, month, 0).getDate();
+  const weekdayWeights = [1872, 2214, 2000, 1978, 2756, 2333, 1975];
+  const maxWeekdayWeight = Math.max(...weekdayWeights);
+  let date;
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const day = 1 + Math.floor(rng() * daysInMonth);
+    const candidate = new Date(2026, month - 1, day);
+    date = candidate;
+    if (rng() <= weekdayWeights[candidate.getDay()] / maxWeekdayWeight) break;
+  }
 
   const hour = weightedPick(
     rng,
-    [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23],
-    [2, 4, 8, 11, 12, 11, 8, 5, 5, 7, 10, 13, 14, 12, 7, 3]
+    [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23],
+    [12, 35, 67, 74, 106, 247, 466, 1145, 1022, 1036, 1033, 1046, 972, 946, 895, 936, 984, 1138, 795, 707, 627, 566, 273]
   );
   date.setHours(hour, Math.floor(rng() * 60), Math.floor(rng() * 60), 0);
   return date.toISOString();
+};
+
+const buildConvertedAmount = (rng) => {
+  const band = weightedPick(
+    rng,
+    [
+      [2500, 10000],
+      [10000, 25000],
+      [25000, 50000],
+      [50000, 100000],
+      [100000, 150000],
+      [150000, 200000],
+      [200000, 900000],
+    ],
+    [3247, 5488, 3881, 1931, 391, 98, 109]
+  );
+
+  const [min, max] = band;
+  const sampled = min >= 200000
+    ? min + Math.min(max - min, -Math.log(1 - rng()) * 75000)
+    : min + Math.pow(rng(), 1.25) * (max - min);
+
+  return roundTo(clamp(sampled, 2500, 900000), 10);
+};
+
+const buildInterestRate = (rng) => {
+  const anchor = weightedPick(
+    rng,
+    [10.08, 11.88, 14.4, 16.44, 18.6, 21, 23.64, 24.84, 24.96],
+    [4, 6, 8, 7, 10, 10, 20, 15, 20]
+  );
+  const jitter = anchor === 24.96 ? 0 : (rng() - 0.5) * 0.24;
+  return Number(clamp(anchor + jitter, 10.08, 24.96).toFixed(2));
 };
 
 const calculateEmi = (principal, annualRate, tenure) => {
@@ -49,45 +92,37 @@ const calculateEmi = (principal, annualRate, tenure) => {
 export const generateDemoCsv = () => {
   const rng = makeRng();
   const rows = [];
-  const totalBookings = 840;
-  const userPool = 560;
+  const totalBookings = 15145;
+  const userPool = 13000;
 
   for (let i = 0; i < totalBookings; i += 1) {
-    const repeatBias = rng();
-    const userIndex = repeatBias < 0.72
-      ? i % userPool
-      : Math.floor(rng() * Math.min(userPool, Math.max(1, i + 1)));
+    const userIndex = i < userPool ? i : Math.floor(rng() * userPool);
 
-    const userId = `demo_user_${pad(userIndex + 1)}`;
-    const cardSlot = rng() < 0.18 ? 2 : 1;
-    const cardId = `demo_card_${pad(userIndex + 1)}_${cardSlot}`;
-    const loanId = `demo_loan_${pad(i + 1, 5)}`;
+    const userId = `demo_user_${pad(userIndex + 1, 5)}`;
+    const cardSlot = i >= userPool && rng() < 0.09 ? 2 : 1;
+    const cardId = `demo_card_${pad(userIndex + 1, 5)}_${cardSlot}`;
+    const loanId = `demo_loan_${pad(i + 1, 6)}`;
 
-    const ticketAnchor = Math.pow(rng(), 1.65);
-    let convertedAmount = 6500 + ticketAnchor * 145000;
-    if (rng() < 0.08) convertedAmount += 70000 + rng() * 90000;
-    convertedAmount = roundTo(clamp(convertedAmount, 5000, 250000), 500);
-
-    const tenure = weightedPick(rng, [6, 12, 24, 36, 48], [27, 36, 22, 10, 5]);
-    const interestRate = Number(clamp(17.2 + rng() * 9 + (tenure >= 36 ? 0.8 : 0), 17, 27).toFixed(2));
+    const convertedAmount = buildConvertedAmount(rng);
+    const tenure = weightedPick(rng, [6, 12, 24, 36, 48], [8110, 4035, 1464, 473, 1063]);
+    const interestRate = buildInterestRate(rng);
     const emi = roundTo(calculateEmi(convertedAmount, interestRate, tenure), 1);
     const totalPayable = roundTo(emi * tenure, 1);
     const totalInterest = roundTo(Math.max(0, totalPayable - convertedAmount), 1);
-
-    const processingFee = convertedAmount < 25000
-      ? weightedPick(rng, [199, 299], [65, 35])
-      : convertedAmount < 75000
-        ? weightedPick(rng, [299, 499], [55, 45])
-        : weightedPick(rng, [499, 799, 999], [35, 40, 25]);
+    const processingFee = weightedPick(
+      rng,
+      [199, 499, 699, 849, 899, 999],
+      [23, 68, 553, 1, 3483, 11017]
+    );
 
     rows.push({
       auth_id: userId,
-      os_type: rng() < 0.69 ? 'Android' : 'iOS',
+      os_type: weightedPick(rng, ['Android', 'iOS'], [11354, 3791]),
       aan_number: cardId,
       loan_number: loanId,
       converted_amount: convertedAmount,
       interest_rate: interestRate,
-      referral_flag: rng() < 0.19 ? 'Yes' : 'No',
+      referral_flag: weightedPick(rng, ['No', 'Yes'], [15078, 67]),
       tenure,
       processing_fee: processingFee,
       emi_amount_per_month: emi,
@@ -95,7 +130,7 @@ export const generateDemoCsv = () => {
       total_interest_amount: totalInterest,
       total_payable_amount: totalPayable,
       conversion_status: 'Y',
-      consent_timestamp: buildTimestamp(rng, i),
+      consent_timestamp: buildTimestamp(rng, i, totalBookings),
     });
   }
 

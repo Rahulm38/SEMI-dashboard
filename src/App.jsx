@@ -32,7 +32,7 @@ function App() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [fileName, setFileName] = useState('Synthetic demo data');
+  const [fileName, setFileName] = useState('Demo portfolio');
   const [theme, setTheme] = useState(localStorage.getItem('semi_theme') || 'light');
   const [showThemeHint, setShowThemeHint] = useState(true);
   const [isUploadHovered, setIsUploadHovered] = useState(false);

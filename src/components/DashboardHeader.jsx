@@ -29,7 +29,6 @@ const DashboardHeader = ({
     <div>
       <h1 className="header-title">SEMI Analytics</h1>
       <p className="header-subtitle">
-        Synthetic Smart EMI portfolio · no real customer data ·
         <span className="header-data-range">{formatDataRange(data, fileName)}</span>
       </p>
     </div>
