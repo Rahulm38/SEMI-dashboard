@@ -5,32 +5,32 @@ import DrillDownModal from './DrillDownModal';
 import MatrixFilter from './MatrixFilter';
 import ResponsiveMatrix from './ResponsiveMatrix';
 
-const SegmentMatrix = ({ matrix, ticketKeys = [], emiKeys = [] }) => {
+const RoiMatrix = ({ matrix, ticketKeys = [], roiKeys = [] }) => {
   const [drillDownData, setDrillDownData] = useState(null);
   const [metric, setMetric] = useState('count');
 
-  const handleCellClick = (emi, ticket, count) => {
+  const handleCellClick = (roi, ticket, count) => {
     if (count === 0) return;
-    const cell = matrix[emi]?.[ticket];
+    const cell = matrix[roi]?.[ticket];
     if (cell && cell.drillDown) {
-      setDrillDownData({ ...cell.drillDown, parentEmi: emi, parentTicket: ticket });
+      setDrillDownData({ ...cell.drillDown, parentEmi: roi, parentTicket: ticket, isRoi: true });
     }
   };
 
   const closeDrillDown = () => setDrillDownData(null);
 
-  // Find max value to color scale based on selected metric
+  // Find max value to color scale
   let maxValue = 0;
-  let maxCellInfo = { emi: '', ticket: '', val: 0 };
-  
-  Object.keys(matrix).forEach(emi => {
-    Object.keys(matrix[emi]).forEach(ticket => {
-      let cell = matrix[emi][ticket];
+  let maxCellInfo = { roi: '', ticket: '', val: 0 };
+
+  Object.keys(matrix || {}).forEach(roi => {
+    Object.keys(matrix[roi] || {}).forEach(ticket => {
+      let cell = matrix[roi][ticket];
       let val = cell[metric];
       if (metric === 'avgTicket') val = cell.count ? cell.amount / cell.count : 0;
       if (val > maxValue) {
         maxValue = val;
-        maxCellInfo = { emi, ticket, val };
+        maxCellInfo = { roi, ticket, val };
       }
     });
   });
@@ -45,14 +45,13 @@ const SegmentMatrix = ({ matrix, ticketKeys = [], emiKeys = [] }) => {
       income: 'interest/fee income'
     }[metric];
     
-    return `Tickets <strong>${maxCellInfo.ticket}</strong> with EMI <strong>${maxCellInfo.emi}</strong> generated the highest ${metricName} (${valFormatted}).`;
+    return `Tickets <strong>${maxCellInfo.ticket}</strong> with ROI <strong>${maxCellInfo.roi}</strong> generated the highest ${metricName} (${valFormatted}).`;
   };
 
   const getCellClass = (val) => {
     if (!val || !maxValue) return 'matrix-cell intensity-0';
     if (val === maxValue) return 'matrix-cell intensity-5';
     
-    // Scale count from 1 to 4 based on maxCount
     const ratio = val / maxValue;
     if (ratio > 0.8) return 'matrix-cell intensity-4';
     if (ratio > 0.5) return 'matrix-cell intensity-3';
@@ -69,21 +68,21 @@ const SegmentMatrix = ({ matrix, ticketKeys = [], emiKeys = [] }) => {
     <div>
       <div className="matrix-card-toolbar">
         <div className="matrix-card-heading">
-          <h2 className="card-title">Ticket x EMI Segment Matrix</h2>
+          <h2 className="card-title">ROI × Ticket Segment Matrix</h2>
           <p className="card-subtitle">
-            Darker cells indicate higher concentration across fixed business ticket and EMI brackets.
+            Distribution of converted users and generated volume across ROI and ticket sizes.
           </p>
         </div>
         <MatrixFilter metric={metric} setMetric={setMetric} />
       </div>
-      
+
       <ResponsiveMatrix
         xLabel="Ticket Size ➔"
-        yLabel="Monthly EMI ➔"
+        yLabel="ROI / Interest Rate ➔"
         columns={ticketKeys}
-        rows={emiKeys}
-        renderCell={(emi, ticket) => {
-          const cellData = matrix[emi]?.[ticket] || { count: 0, amount: 0, income: 0 };
+        rows={roiKeys}
+        renderCell={(r, t) => {
+          const cellData = matrix[r]?.[t] || { count: 0, amount: 0, income: 0 };
           let cellValue = cellData[metric];
           if (metric === 'avgTicket') cellValue = cellData.count ? cellData.amount / cellData.count : 0;
 
@@ -91,7 +90,7 @@ const SegmentMatrix = ({ matrix, ticketKeys = [], emiKeys = [] }) => {
             <div
               className={`${getCellClass(cellValue)} ${cellData.count > 0 ? 'clickable-cell' : ''}`}
               title={cellData.count > 0 ? `${cellData.count} Users, ${formatCurrency(cellData.amount)} (Click to expand)` : "No activity"}
-              onClick={() => cellData.count > 0 && handleCellClick(emi, ticket, cellData.count)}
+              onClick={() => cellData.count > 0 && handleCellClick(r, t, cellData.count)}
             >
               {cellValue > 0 ? (
                 <>
@@ -105,7 +104,7 @@ const SegmentMatrix = ({ matrix, ticketKeys = [], emiKeys = [] }) => {
           );
         }}
       />
-      
+
       {getDynamicInsight() && (
         <div className="insight-callout insight-callout--spaced">
           <span className="insight-callout-icon">✨</span>
@@ -124,4 +123,4 @@ const SegmentMatrix = ({ matrix, ticketKeys = [], emiKeys = [] }) => {
   );
 };
 
-export default SegmentMatrix;
+export default RoiMatrix;

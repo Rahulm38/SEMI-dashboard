@@ -1,11 +1,10 @@
-import React from 'react';
 import { formatCurrency } from '../utils/dataProcessor';
 
 const TopBookingsTable = ({ topBookings }) => {
   if (!topBookings || topBookings.length === 0) return null;
 
   return (
-    <div>
+    <div style={{ width: '100%' }}>
       <h2 className="card-title">Top Bookings</h2>
       <p className="card-subtitle">Largest individual bookings by converted amount.</p>
       

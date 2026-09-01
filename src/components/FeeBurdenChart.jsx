@@ -1,22 +1,24 @@
-import React from 'react';
-import { ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Label } from 'recharts';
 import { formatCurrency } from '../utils/dataProcessor';
 
-const FeeBurdenChart = ({ data }) => {
-  if (!data || data.length === 0) return null;
+const FeeBurdenChart = ({ data, feeBurdenByBracket }) => {
+  if (!data || data.length === 0 || !feeBurdenByBracket) return null;
 
-  // Find max burden for insight
-  let maxBurden = 0;
-  data.forEach(d => {
-    if (d.feePct > maxBurden) maxBurden = d.feePct;
+  // Find lowest and highest average burden brackets
+  let bestBracket = feeBurdenByBracket[0];
+  let worstBracket = feeBurdenByBracket[0];
+  
+  feeBurdenByBracket.forEach(b => {
+    if (b.avgBurden > 0 && b.avgBurden < bestBracket.avgBurden) bestBracket = b;
+    if (b.avgBurden > worstBracket.avgBurden) worstBracket = b;
   });
   
-  const insight = `Pattern: For small ticket loans, the flat processing fee can consume up to ${maxBurden.toFixed(1)}% of the loan principal.`;
+  const insight = `${bestBracket.name} loans average only ${bestBracket.avgBurden.toFixed(1)}% fee burden vs ${worstBracket.avgBurden.toFixed(1)}% for ${worstBracket.name}. Fee economics strongly favor larger ticket sizes.`;
 
   return (
-    <div style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
       <h2 className="card-title">Processing Fee vs Ticket Size</h2>
-      <p className="card-subtitle">Showing how flat fees disproportionately tax smaller loans. Each dot is a booking.</p>
+      <p className="card-subtitle">Flat fees become a heavier burden on smaller loans. This shows the relationship per booking.</p>
       
       <div style={{ height: 300, minHeight: 300 }}>
         <ResponsiveContainer width="100%" height="100%">
@@ -28,7 +30,7 @@ const FeeBurdenChart = ({ data }) => {
               name="Ticket Size" 
               stroke="var(--text-tertiary)" 
               tick={{fill: 'var(--text-tertiary)'}}
-              label={{ value: 'Ticket Size (Rs)', position: 'insideBottom', offset: -10, fill: 'var(--text-tertiary)' }}
+              label={{ value: 'Ticket Size (₹)', position: 'insideBottom', offset: -5, fill: 'var(--text-secondary)', fontSize: 12, dy: 15 }}
               tickFormatter={(val) => {
                 if (val >= 100000) return `${(val/100000).toFixed(1)}L`;
                 if (val >= 1000) return `${(val/1000).toFixed(0)}K`;
@@ -41,13 +43,14 @@ const FeeBurdenChart = ({ data }) => {
               name="Fee Burden" 
               stroke="var(--text-tertiary)" 
               tick={{fill: 'var(--text-tertiary)'}}
-              label={{ value: 'Fee as % of Loan', angle: -90, position: 'insideLeft', fill: 'var(--text-tertiary)' }}
               tickFormatter={(val) => `${val.toFixed(0)}%`} 
-            />
+            >
+              <Label value="Fee vs Principal (%)" angle={-90} position="insideLeft" fill="var(--text-secondary)" fontSize={12} dx={-10} style={{ textAnchor: 'middle' }} />
+            </YAxis>
             
             <Tooltip 
               cursor={{ strokeDasharray: '3 3' }}
-              contentStyle={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)', borderRadius: '8px' }}
+              contentClassName="custom-tooltip"
               formatter={(value, name) => {
                 if (name === 'Ticket Size') return formatCurrency(value);
                 if (name === 'Fee Burden') return `${value.toFixed(2)}%`;
@@ -60,9 +63,9 @@ const FeeBurdenChart = ({ data }) => {
         </ResponsiveContainer>
       </div>
 
-      <div className="insight-box">
-        <span className="insight-icon">✨</span>
-        <span className="insight-text">{insight}</span>
+      <div className="insight-callout">
+        <span className="insight-callout-icon">✨</span>
+        <span className="insight-callout-text">{insight}</span>
       </div>
     </div>
   );

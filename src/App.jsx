@@ -1,279 +1,373 @@
-import React, { useState, useEffect } from 'react';
-import { UploadCloud, FileSpreadsheet, RefreshCw, Filter } from 'lucide-react';
-import { processCsvData, calculateMetrics } from './utils/dataProcessor';
-import SummaryCards from './components/SummaryCards';
-import BookingSizeChart from './components/BookingSizeChart';
-import EmiComfortChart from './components/EmiComfortChart';
-import TenureBehaviorChart from './components/TenureBehaviorChart';
-import RoiBandChart from './components/RoiBandChart';
-import ValueConcentrationChart from './components/ValueConcentrationChart';
-import SegmentMatrix from './components/SegmentMatrix';
-import TemporalTrendsChart from './components/TemporalTrendsChart';
-import CostOfBorrowingChart from './components/CostOfBorrowingChart';
-import ProcessingFeeAnalysis from './components/ProcessingFeeAnalysis';
-import TopBookingsTable from './components/TopBookingsTable';
-import BestSegmentCard from './components/BestSegmentCard';
-import FeeBurdenChart from './components/FeeBurdenChart';
-import ProfitabilityQuadrant from './components/ProfitabilityQuadrant';
-import MarketingHeatmap from './components/MarketingHeatmap';
+import { lazy, Suspense, useState, useEffect, useMemo } from 'react';
+import { DollarSign, Star, TrendingUp, LayoutGrid, Sliders } from 'lucide-react';
+import { processCsvData, calculateMetrics, sanitizeCsvForStorage } from './utils/dataProcessor';
+import { generateDemoCsv } from './utils/demoData';
+import DashboardHeader from './components/DashboardHeader';
+import GlobalSlicers from './components/GlobalSlicers';
+import { EmptyDatabaseState, ErrorState, LoadingState, NoMatchingRecordsState } from './components/DashboardStates';
+
+const SummaryCards = lazy(() => import('./components/SummaryCards'));
+const BookingSizeChart = lazy(() => import('./components/BookingSizeChart'));
+const EmiComfortChart = lazy(() => import('./components/EmiComfortChart'));
+const TenureBehaviorChart = lazy(() => import('./components/TenureBehaviorChart'));
+const ValueConcentrationChart = lazy(() => import('./components/ValueConcentrationChart'));
+const RoiMatrix = lazy(() => import('./components/RoiMatrix'));
+const SegmentMatrix = lazy(() => import('./components/SegmentMatrix'));
+const KeyTakeaways = lazy(() => import('./components/KeyTakeaways'));
+const TemporalTrendsChart = lazy(() => import('./components/TemporalTrendsChart'));
+const ProcessingFeeAnalysis = lazy(() => import('./components/ProcessingFeeAnalysis'));
+const TopBookingsTable = lazy(() => import('./components/TopBookingsTable'));
+const UserAveragesCard = lazy(() => import('./components/UserAveragesCard'));
+const SectionDivider = lazy(() => import('./components/SectionDivider'));
+
+const FeeBurdenChart = lazy(() => import('./components/FeeBurdenChart'));
+const ProfitabilityQuadrant = lazy(() => import('./components/ProfitabilityQuadrant'));
+const MarketingHeatmap = lazy(() => import('./components/MarketingHeatmap'));
+const RevenueYieldCharts = lazy(() => import('./components/RevenueYieldCharts'));
+const BookingMapChart = lazy(() => import('./components/BookingMapChart'));
+const RepeatUserAnalytics = lazy(() => import('./components/RepeatUserAnalytics'));
+const PlatformMix = lazy(() => import('./components/PlatformMix'));
 
 function App() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [fileName, setFileName] = useState('data.csv');
-  
-  const [filters, setFilters] = useState({ tenure: 'All', roi: 'All' });
+  const [fileName, setFileName] = useState('Synthetic demo data');
+  const [theme, setTheme] = useState(localStorage.getItem('semi_theme') || 'light');
+  const [showThemeHint, setShowThemeHint] = useState(true);
+  const [isUploadHovered, setIsUploadHovered] = useState(false);
+  const [filters, setFilters] = useState({ startDate: '', endDate: '' });
 
   useEffect(() => {
-    fetch('/data.csv')
-      .then(response => {
-        if (!response.ok) throw new Error("Could not find default data.csv");
-        return response.text();
-      })
-      .then(csv => processCsvData(csv))
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('semi_theme', theme);
+  }, [theme]);
+
+  useEffect(() => {
+    if (!showThemeHint) return;
+
+    const timer = window.setTimeout(() => {
+      setShowThemeHint(false);
+    }, 5000);
+
+    return () => window.clearTimeout(timer);
+  }, [showThemeHint]);
+
+  const processAndSetData = (csvString) => {
+    processCsvData(csvString)
       .then(result => {
-        setData(result);
+        if (!result.rawData || result.rawData.length === 0) {
+          setData(null);
+          setLoading(false);
+          return;
+        }
+
+        const validDates = result.rawData
+          .filter(d => d.date && !isNaN(d.date.getTime()))
+          .map(d => d.date);
+
+        let minDateStr = '';
+        let maxDateStr = '';
+        let minDateTime = '';
+        let maxDateTime = '';
+
+        if (validDates.length) {
+          const minEpoch = Math.min(...validDates);
+          const maxEpoch = Math.max(...validDates);
+          minDateStr = new Date(minEpoch).toISOString().split('T')[0];
+          maxDateStr = new Date(maxEpoch).toISOString().split('T')[0];
+          minDateTime = new Date(minEpoch).toISOString();
+          maxDateTime = new Date(maxEpoch).toISOString();
+        }
+
+        setData({ ...result, minDateStr, maxDateStr, minDateTime, maxDateTime });
+        setFilters({ startDate: minDateStr, endDate: maxDateStr });
+        setError(null);
         setLoading(false);
       })
-      .catch(err => {
-        console.log("No default data, wait for upload.", err);
+      .catch(parseErr => {
+        console.error('Failed to parse dashboard data', parseErr);
+        setError('Failed to initialize the dashboard.');
         setLoading(false);
       });
+  };
+
+  useEffect(() => {
+    try {
+      localStorage.removeItem('latest_csv');
+    } catch (storageErr) {
+      console.warn('Could not clear legacy CSV cache.', storageErr);
+    }
+
+    processAndSetData(generateDemoCsv());
   }, []);
 
-  // Handle Global Filters
-  useEffect(() => {
-    if (data && data.rawData) {
-      let filteredData = data.rawData;
-      if (filters.tenure !== 'All') {
-        filteredData = filteredData.filter(d => d.tenure.toString() === filters.tenure);
-      }
-      if (filters.roi !== 'All') {
-        if (filters.roi === '<=12%') filteredData = filteredData.filter(d => d.interest_rate <= 12);
-        else if (filters.roi === '12-18%') filteredData = filteredData.filter(d => d.interest_rate > 12 && d.interest_rate <= 18);
-        else if (filters.roi === '18-22%') filteredData = filteredData.filter(d => d.interest_rate > 18 && d.interest_rate <= 22);
-        else if (filters.roi === '22%+') filteredData = filteredData.filter(d => d.interest_rate > 22);
-      }
-      
-      const newMetrics = calculateMetrics(filteredData);
-      setData(prev => ({ ...prev, metrics: newMetrics }));
+  const filteredLocalMetrics = useMemo(() => {
+    if (!data?.rawData) return null;
+
+    let filteredData = data.rawData;
+    if (filters.startDate) {
+      const start = new Date(filters.startDate);
+      filteredData = filteredData.filter(d => d.date && d.date >= start);
     }
-  }, [filters, data?.rawData]);
+    if (filters.endDate) {
+      const end = new Date(filters.endDate);
+      end.setHours(23, 59, 59, 999);
+      filteredData = filteredData.filter(d => d.date && d.date <= end);
+    }
+
+    return calculateMetrics(filteredData);
+  }, [data?.rawData, filters.startDate, filters.endDate]);
 
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
     if (!file) return;
-    
-    setFileName(file.name);
+
+    const MAX_FILE_SIZE = 4.5 * 1024 * 1024;
+    if (file.size > MAX_FILE_SIZE) {
+      alert('Please upload a CSV smaller than 4.5MB.');
+      event.target.value = '';
+      return;
+    }
+
+    setFileName(`${file.name} · local session only`);
     setLoading(true);
-    setFilters({ tenure: 'All', roi: 'All' }); // Reset filters
-    
+    setError(null);
+    setFilters({ startDate: '', endDate: '' });
+
     const reader = new FileReader();
     reader.onload = (e) => {
-      processCsvData(e.target.result)
+      const sanitizedCsv = sanitizeCsvForStorage(e.target.result);
+
+      processCsvData(sanitizedCsv)
         .then(result => {
-          setData(result);
+          if (!result.rawData || result.rawData.length === 0) {
+            throw new Error('No valid data found in CSV');
+          }
+
+          const validDates = result.rawData
+            .filter(d => d.date && !isNaN(d.date.getTime()))
+            .map(d => d.date);
+
+          let minDateStr = '';
+          let maxDateStr = '';
+          let minDateTime = '';
+          let maxDateTime = '';
+
+          if (validDates.length) {
+            const minEpoch = Math.min(...validDates);
+            const maxEpoch = Math.max(...validDates);
+            minDateStr = new Date(minEpoch).toISOString().split('T')[0];
+            maxDateStr = new Date(maxEpoch).toISOString().split('T')[0];
+            minDateTime = new Date(minEpoch).toISOString();
+            maxDateTime = new Date(maxEpoch).toISOString();
+          }
+
+          setData({ ...result, minDateStr, maxDateStr, minDateTime, maxDateTime });
+          setFilters({ startDate: minDateStr, endDate: maxDateStr });
           setError(null);
           setLoading(false);
         })
         .catch(err => {
-          setError("Failed to parse CSV file");
+          setError(
+            err.message === 'No valid data found in CSV'
+              ? 'The uploaded file contains no valid EMI records.'
+              : 'Failed to parse CSV file locally.'
+          );
           setLoading(false);
         });
     };
     reader.readAsText(file);
   };
 
-  const m = data?.metrics;
+  const m = filteredLocalMetrics || data?.metrics;
 
   return (
     <div className="app-container">
-      <header className="header animate-fade-in delay-1">
-        <div>
-          <h1 className="header-title">SEMI Analytics</h1>
-          <p className="header-subtitle">Interactive dashboard for Smart EMI conversions · <span style={{ opacity: 0.7 }}>{fileName}</span></p>
-        </div>
-        
-        <label className="drop-zone">
-          <UploadCloud size={20} color="var(--primary-light)" />
-          <span className="drop-text">Upload new CSV</span>
-          <input 
-            type="file" 
-            accept=".csv" 
-            onChange={handleFileUpload} 
-            style={{ display: 'none' }} 
-          />
-        </label>
-      </header>
+      <DashboardHeader
+        data={data}
+        fileName={fileName}
+        theme={theme}
+        showThemeHint={showThemeHint}
+        isUploadHovered={isUploadHovered}
+        onFileUpload={handleFileUpload}
+        onUploadHoverChange={setIsUploadHovered}
+        onThemeToggle={() => {
+          setTheme(t => t === 'dark' ? 'light' : 'dark');
+          setShowThemeHint(false);
+        }}
+      />
 
-      {loading && (
-        <div style={{ display: 'flex', justifyContent: 'center', padding: '4rem', color: 'var(--primary)' }}>
-          <RefreshCw className="spin" size={32} />
-        </div>
-      )}
+      {loading && <LoadingState />}
 
-      {error && (
-        <div style={{ color: 'var(--accent-orange)', padding: '2rem', textAlign: 'center' }}>
-          {error}
-        </div>
-      )}
+      {error && <ErrorState error={error} />}
 
-      {/* Global Filters UI */}
-      {!loading && data?.rawData && (
-        <div className="filters-container animate-fade-in delay-2" style={{ display: 'flex', gap: '1rem', marginBottom: '2rem', background: 'var(--bg-card)', padding: '1rem 1.5rem', borderRadius: '12px', border: '1px solid var(--border-color)', alignItems: 'center' }}>
-          <Filter size={18} color="var(--text-muted)" />
-          <span style={{ color: 'var(--text-muted)', fontWeight: 600, fontSize: '0.9rem', marginRight: '1rem' }}>Global Slicers:</span>
-          
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-            <label style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Tenure:</label>
-            <select 
-              value={filters.tenure} 
-              onChange={(e) => setFilters(p => ({...p, tenure: e.target.value}))}
-              style={{ background: 'rgba(255,255,255,0.05)', color: 'white', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.25rem 0.5rem', outline: 'none' }}
-            >
-              <option value="All">All Tenures</option>
-              <option value="6">6 Months</option>
-              <option value="12">12 Months</option>
-              <option value="24">24 Months</option>
-              <option value="36">36 Months</option>
-              <option value="48">48 Months</option>
-            </select>
-          </div>
+      {!loading && !data && !error && <EmptyDatabaseState />}
 
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginLeft: '1.5rem' }}>
-            <label style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>ROI Band:</label>
-            <select 
-              value={filters.roi} 
-              onChange={(e) => setFilters(p => ({...p, roi: e.target.value}))}
-              style={{ background: 'rgba(255,255,255,0.05)', color: 'white', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.25rem 0.5rem', outline: 'none' }}
-            >
-              <option value="All">All ROI</option>
-              <option value="<=12%">Under 12%</option>
-              <option value="12-18%">12% - 18%</option>
-              <option value="18-22%">18% - 22%</option>
-              <option value="22%+">22%+</option>
-            </select>
-          </div>
-        </div>
-      )}
+      {!loading && data && <GlobalSlicers data={data} filters={filters} setFilters={setFilters} />}
 
-      {/* Empty State when filters yield 0 results */}
-      {!loading && !m && data?.rawData && (
-        <div style={{ textAlign: 'center', padding: '5rem', color: 'var(--text-muted)' }}>
-          <h2>No matching records</h2>
-          <p>Try adjusting your global filters.</p>
-        </div>
-      )}
+      {!loading && !m && (data?.rawData || data?.minDateStr) && <NoMatchingRecordsState />}
 
       {!loading && m && (
-        <div className="dashboard-grid">
-          {/* ━━━ Overview ━━━ */}
-          <div className="col-span-12 glass-card animate-fade-in delay-2">
-            <SummaryCards metrics={m.summary} />
+        <Suspense fallback={<LoadingState />}>
+        <div id="dashboard-content" className="dashboard-content">
+          <div className="pdf-page-section">
+            <div className="dashboard-grid">
+              <div className="col-span-12 glass-card animate-fade-in delay-2 flex-col">
+                <div className="card-header overview-card-header">
+                  <h2 className="card-title overview-card-title">Portfolio Overview</h2>
+                  <span className="date-pill">
+                    {m.summary.dateRange}
+                  </span>
+                </div>
+                <Suspense fallback={<div className="loading-overview">Loading overview...</div>}>
+                  <SummaryCards metrics={m.summary} />
+                </Suspense>
+              </div>
+            </div>
           </div>
 
-          {/* ━━━ Size & Affordability ━━━ */}
-          <div className="section-divider">
-            <span className="section-label">📊 Size & Affordability</span>
+          <SectionDivider icon={<TrendingUp size={16} />} title="Conversion Activity" subtitle="When does demand arrive? Volume, velocity and day-of-week patterns" />
+
+          <div className="pdf-page-section">
+            <div className="dashboard-grid">
+              <div className="col-span-12 glass-card animate-fade-in delay-3 flex-col">
+                <TemporalTrendsChart timeData={m.timeData} insight={m.insights.biggestDay} />
+              </div>
+            </div>
           </div>
 
-          <div className="col-span-8 glass-card animate-fade-in delay-3" style={{ display: 'flex', flexDirection: 'column' }}>
-            <BookingSizeChart data={m.ticketData} insight={m.insights.ticket} />
+          <div className="pdf-page-section">
+            <div className="dashboard-grid">
+              <div className="col-span-12 glass-card animate-fade-in delay-3 flex-col">
+                <MarketingHeatmap data={m.heatmapData} />
+              </div>
+            </div>
           </div>
 
-          <div className="col-span-4 glass-card animate-fade-in delay-3" style={{ display: 'flex', flexDirection: 'column' }}>
-            <EmiComfortChart data={m.emiData} insight={m.insights.emi} />
+          <SectionDivider icon={<LayoutGrid size={16} />} title="Segment Landscape" subtitle="Ticket size × EMI footprint × ROI distribution across all bookings" />
+
+          <div className="pdf-page-section">
+            <div className="dashboard-grid">
+              <div className="col-span-12 glass-card animate-fade-in delay-2 flex-col">
+                <BookingMapChart scatterData={m.scatterData} />
+              </div>
+            </div>
           </div>
 
-          {/* ━━━ Segmentation & Concentration ━━━ */}
-          <div className="section-divider">
-            <span className="section-label">🎯 Segmentation & Concentration</span>
+          <div className="pdf-page-section">
+            <div className="dashboard-grid">
+              <div className="col-span-12 glass-card animate-fade-in delay-3 flex-col">
+                <SegmentMatrix matrix={m.matrix} ticketKeys={m.ticketKeys} emiKeys={m.emiKeys} />
+              </div>
+            </div>
           </div>
 
-          <div className="col-span-12 glass-card animate-fade-in delay-3">
-            <SegmentMatrix matrix={m.matrix} />
-            <BestSegmentCard insight={{
-              ticketRange: m.bestSegmentData?.ticketRange ? `Rs. ${m.bestSegmentData.ticketRange}` : 'N/A',
-              emiRange: m.bestSegmentData?.emiRange ? `${m.bestSegmentData.emiRange}/mo` : 'N/A',
-              users: m.bestSegmentData?.users,
-              amountShare: m.bestSegmentData?.amount 
-                ? ((m.bestSegmentData.amount / m.summary.totalConverted) * 100).toFixed(1)
-                : '0',
-              description: m.insights.bestSegment
-            }} />
+          <div className="pdf-page-section">
+            <div className="dashboard-grid">
+              <div className="col-span-12 glass-card animate-fade-in delay-4 flex-col">
+                <RoiMatrix matrix={m.roiMatrix} ticketKeys={m.ticketKeys} roiKeys={m.roiKeys} />
+              </div>
+            </div>
           </div>
 
-          {/* ━━━ Profitability Quadrant ━━━ */}
-          <div className="col-span-12 glass-card animate-fade-in delay-3">
-            <ProfitabilityQuadrant data={m.quadrantData} />
+          <SectionDivider icon={<DollarSign size={16} />} title="Revenue & Profitability" subtitle="Yield, fee structure and income concentration across the portfolio" />
+
+          <div className="pdf-page-section">
+            <div className="dashboard-grid">
+              <div className="col-span-12 glass-card animate-fade-in delay-3 flex-col">
+                <RevenueYieldCharts tenureData={m.revenueByTenureData} roiData={m.revenueByRoiData} summary={m.summary} roiInsight={m.insights.roi} />
+              </div>
+            </div>
           </div>
 
-          {/* ━━━ Value Concentration ━━━ */}
-          <div className="col-span-12 glass-card animate-fade-in delay-3" style={{ display: 'flex', flexDirection: 'column' }}>
-            <ValueConcentrationChart topBookings={m.topBookings} totalConverted={m.summary.totalConverted} insight={m.insights.concentration} />
+          <div className="pdf-page-section">
+            <div className="dashboard-grid">
+              <div className="col-span-12 glass-card animate-fade-in delay-3 flex-col">
+                <ProfitabilityQuadrant data={m.quadrantData} />
+              </div>
+            </div>
           </div>
 
-          {/* ━━━ Tenure & Interest ━━━ */}
-          <div className="section-divider">
-            <span className="section-label">📈 Average Interest and Tenure</span>
+          <div className="pdf-page-section">
+            <div className="dashboard-grid">
+              <div className="col-span-6 glass-card animate-fade-in delay-3 flex-col">
+                <ProcessingFeeAnalysis feeData={m.feeData} insight={m.insights.fee} />
+              </div>
+              <div className="col-span-6 glass-card animate-fade-in delay-3 flex-col">
+                <FeeBurdenChart data={m.quadrantData} feeBurdenByBracket={m.feeBurdenData} />
+              </div>
+            </div>
           </div>
 
-          <div className="col-span-12 glass-card animate-fade-in delay-3" style={{ display: 'flex', flexDirection: 'column' }}>
-            <TenureBehaviorChart data={m.tenureData} tenureByTicket={m.tenureByTicket} insight={m.insights.tenure} />
+          <div className="pdf-page-section">
+            <div className="dashboard-grid">
+              <div className="col-span-12 glass-card animate-fade-in delay-3 flex-col">
+                <PlatformMix data={m.platformData} insight={m.insights.platform} />
+              </div>
+            </div>
           </div>
 
-          <div className="col-span-6 glass-card animate-fade-in delay-3" style={{ display: 'flex', flexDirection: 'column' }}>
-            <RoiBandChart data={m.roiData} insight={m.insights.roi} />
+          <SectionDivider icon={<Sliders size={16} />} title="Loan Product Behaviour" subtitle="Ticket distribution, EMI affordability and tenure preference across the book" />
+
+          <div className="pdf-page-section">
+            <div className="dashboard-grid">
+              <div className="col-span-12 glass-card animate-fade-in delay-3 flex-col">
+                <div className="card-header">
+                  <h2 className="card-title">Loan Averages</h2>
+                  <p className="card-subtitle">Typical ticket and EMI across the converted portfolio</p>
+                </div>
+                <UserAveragesCard metrics={m.summary} />
+              </div>
+            </div>
           </div>
 
-          <div className="col-span-6 glass-card animate-fade-in delay-3" style={{ display: 'flex', flexDirection: 'column' }}>
-            <CostOfBorrowingChart costData={m.costData} />
+          <div className="pdf-page-section">
+            <div className="dashboard-grid">
+              <div className="col-span-6 glass-card animate-fade-in delay-3 flex-col">
+                <BookingSizeChart data={m.ticketData} insight={m.insights.ticket} />
+              </div>
+              <div className="col-span-6 glass-card animate-fade-in delay-3 flex-col">
+                <EmiComfortChart data={m.emiData} insight={m.insights.emi} />
+              </div>
+            </div>
           </div>
 
-          {/* ━━━ Temporal Analysis ━━━ */}
-          <div className="section-divider">
-            <span className="section-label">⏱️ Temporal Trends</span>
-          </div>
-          
-          <div className="col-span-12 glass-card animate-fade-in delay-3" style={{ display: 'flex', flexDirection: 'column' }}>
-            <TemporalTrendsChart timeData={m.timeData} insight={`${m.insights.time} ${m.insights.biggestDay}`} />
-          </div>
-
-          {/* ━━━ Unit Economics & Pricing ━━━ */}
-          <div className="section-divider">
-            <span className="section-label">💸 Unit Economics & Pricing</span>
+          <div className="pdf-page-section">
+            <div className="dashboard-grid">
+              <div className="col-span-12 glass-card animate-fade-in delay-3 flex-col">
+                <TenureBehaviorChart data={m.tenureData} tenureByTicket={m.tenureByTicket} insight={m.insights.tenure} />
+              </div>
+            </div>
           </div>
 
-          <div className="col-span-12 glass-card animate-fade-in delay-3">
-            <FeeBurdenChart data={m.quadrantData} />
-          </div>
-          
-          <div className="col-span-6 glass-card animate-fade-in delay-3" style={{ display: 'flex', flexDirection: 'column' }}>
-            <ProcessingFeeAnalysis feeData={m.feeData} insight={m.insights.fee} />
+          <SectionDivider icon={<Star size={16} />} title="Customer Quality & Loyalty" subtitle="Who is coming back, how much they bring, and what the top cohort looks like" />
+
+          <div className="pdf-page-section">
+            <div className="dashboard-grid">
+              <div className="col-span-12 glass-card animate-fade-in delay-3 flex-col">
+                <ValueConcentrationChart topBookings={m.topBookings} totalConverted={m.summary.totalConverted} insight={m.insights.concentration} />
+              </div>
+            </div>
           </div>
 
-          <div className="col-span-6 glass-card animate-fade-in delay-3">
-            <MarketingHeatmap data={m.heatmapData} />
+          <div className="pdf-page-section">
+            <div className="dashboard-grid">
+              <RepeatUserAnalytics metrics={m.summary} />
+            </div>
           </div>
 
-          {/* ━━━ Top Bookings ━━━ */}
-          <div className="section-divider">
-            <span className="section-label">🏆 Top Bookings Details</span>
+          <div className="pdf-page-section">
+            <div className="dashboard-grid">
+              <div className="col-span-12 glass-card animate-fade-in delay-3 flex-col">
+                <TopBookingsTable topBookings={m.topBookingsDetailed} />
+              </div>
+            </div>
           </div>
 
-          <div className="col-span-12 glass-card animate-fade-in delay-3" style={{ marginBottom: '2rem' }}>
-            <TopBookingsTable topBookings={m.topBookingsDetailed} />
-          </div>
+          <KeyTakeaways takeaways={m.keyTakeaways} />
         </div>
-      )}
-      
-      {!loading && !data && !error && (
-        <div style={{ textAlign: 'center', padding: '5rem', color: 'var(--text-muted)' }}>
-          <FileSpreadsheet size={48} style={{ opacity: 0.5, marginBottom: '1rem' }} />
-          <h2>No data available</h2>
-          <p>Please upload a SEMI user details CSV to view insights.</p>
-        </div>
+        </Suspense>
       )}
     </div>
   );

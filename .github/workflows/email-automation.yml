@@ -1,0 +1,59 @@
+name: SEMI Dashboard Email Automation
+
+on:
+  # schedule:
+  #   # Runs at 02:17, 04:17, 06:17, 08:17, 10:17 UTC daily (7:47 AM, 9:47 AM, 11:47 AM, 1:47 PM, 3:47 PM IST)
+  #   # Using an odd minute (17) helps bypass GitHub Action's peak load congestion at :00 and :30
+  #   # - cron: '17 2,4,6,8,10 * * *'
+  workflow_dispatch: # Allows manual trigger from GitHub UI
+    inputs:
+      force:
+        description: 'Force send email even if data has not updated'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: write # Needed to commit state file and email-report.html back
+
+jobs:
+  check-and-email:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Email Automation Script
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          EMAIL_TO_RECIPIENTS: ${{ secrets.EMAIL_TO_RECIPIENTS }}
+          TZ: Asia/Kolkata
+        run: |
+          if [ "${{ github.event.inputs.force }}" = "true" ]; then
+            node scripts/semi-dashboard-email-check.mjs prepare --force
+          else
+            node scripts/semi-dashboard-email-check.mjs prepare
+          fi
+          
+          # If a pending file was created, mark it as sent so it updates the state file
+          PENDING_FILE=$(ls scratch/emails/pending-*.json 2>/dev/null | head -n 1 || true)
+          if [ -n "$PENDING_FILE" ]; then
+            node scripts/semi-dashboard-email-check.mjs mark-sent --pending-file "$PENDING_FILE"
+            rm "$PENDING_FILE" # Clean up pending file so it doesn't get committed
+          fi
+
+      - name: Commit and Push Changes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add .semi-dashboard-email-state.json || echo "Files not found to add"
+          git diff-index --quiet HEAD || (git commit -m "chore: update email automation state [skip ci]" && git push)
